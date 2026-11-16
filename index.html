@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Кто откуда</title>
+<meta name="description" content="Учёт, сколько людей пришло от какой организации">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #fff; --fg: #000; --muted: #6b6b6b; --line: #e2e2e2; --soft: #f3f3f3;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #000; --fg: #fff; --muted: #9a9a9a; --line: #2a2a2a; --soft: #141414; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+    user-select: none;
+  }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  main { flex: 1; overflow-y: auto; padding: 16px; }
+  section { display: none; max-width: 640px; margin: 0 auto; }
+  section.active { display: block; }
+  h1 { font-size: 22px; margin: 4px 0 16px; font-weight: 600; }
+  .muted { color: var(--muted); }
+
+  /* Вкладки */
+  nav {
+    display: flex; border-top: 1px solid var(--line); background: var(--bg);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav button { flex: 1; padding: 14px 4px; font-size: 15px; color: var(--muted); border-top: 2px solid transparent; margin-top: -1px; }
+  nav button[aria-selected="true"] { color: var(--fg); border-top-color: var(--fg); font-weight: 600; }
+
+  /* Приём */
+  #orgButtons { display: grid; gap: 12px; }
+  .org-btn {
+    width: 100%; min-height: 84px; padding: 16px; font-size: 22px; font-weight: 600;
+    border: 2px solid var(--fg); border-radius: 16px; text-align: center; word-break: break-word;
+    transition: background .15s, color .15s;
+  }
+  .org-btn:active, .org-btn.flash { background: var(--fg); color: var(--bg); }
+  .thanks {
+    position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%) scale(.9);
+    background: var(--fg); color: var(--bg); padding: 20px 32px; border-radius: 16px;
+    font-size: 26px; font-weight: 700; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s;
+  }
+  .thanks.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  .undo-row { margin-top: 20px; display: flex; justify-content: center; }
+  .btn {
+    padding: 12px 18px; border: 1px solid var(--fg); border-radius: 12px; font-size: 16px;
+  }
+  .btn:disabled { opacity: .3; cursor: default; }
+  .btn.primary { background: var(--fg); color: var(--bg); }
+  .btn.danger { border-style: dashed; }
+
+  /* Статистика */
+  .periods { display: flex; gap: 6px; margin-bottom: 16px; }
+  .periods button { flex: 1; padding: 10px 4px; border: 1px solid var(--line); border-radius: 10px; font-size: 15px; }
+  .periods button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .total { font-size: 48px; font-weight: 700; line-height: 1; }
+  .total-label { margin: 4px 0 20px; }
+  .row { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .row-head { display: flex; justify-content: space-between; gap: 12px; }
+  .row-name { word-break: break-word; }
+  .row-num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .bar { height: 6px; background: var(--soft); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--fg); border-radius: 3px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 24px; }
+
+  /* Настройки */
+  .org-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .org-item span { flex: 1; word-break: break-word; }
+  .icon-btn { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+  .add-row { display: flex; gap: 8px; margin-top: 16px; }
+  input[type=text] {
+    flex: 1; min-width: 0; padding: 12px; font: inherit; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--fg); border-radius: 12px; user-select: text;
+  }
+  .empty { padding: 24px 0; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <section id="tab-take" class="active" aria-label="Приём">
+    <h1>Откуда вы?</h1>
+    <div id="orgButtons"></div>
+    <div class="undo-row"><button class="btn" id="undoBtn" disabled>Отменить</button></div>
+  </section>
+
+  <section id="tab-stats" aria-label="Статистика">
+    <h1>Статистика</h1>
+    <div class="periods" role="group" aria-label="Период">
+      <button data-period="today" aria-pressed="true">Сегодня</button>
+      <button data-period="week" aria-pressed="false">Неделя</button>
+      <button data-period="all" aria-pressed="false">Всё время</button>
+    </div>
+    <div class="total" id="total">0</div>
+    <div class="total-label muted" id="totalLabel">человек</div>
+    <div id="statRows"></div>
+    <div class="actions">
+      <button class="btn primary" id="exportBtn">Экспорт CSV</button>
+      <button class="btn danger" id="resetBtn">Сбросить статистику</button>
+    </div>
+  </section>
+
+  <section id="tab-settings" aria-label="Настройки">
+    <h1>Организации</h1>
+    <div id="orgList"></div>
+    <form class="add-row" id="addForm">
+      <input type="text" id="newOrg" placeholder="Название организации" maxlength="80" autocomplete="off">
+      <button class="btn primary" type="submit">Добавить</button>
+    </form>
+    <p class="muted" style="margin-top:16px;font-size:14px">
+      При переименовании прошлые записи остаются под старым названием.
+      Данные хранятся только на этом устройстве — делайте экспорт CSV для резервной копии.
+    </p>
+  </section>
+</main>
+
+<nav role="tablist">
+  <button role="tab" data-tab="take" aria-selected="true">Приём</button>
+  <button role="tab" data-tab="stats" aria-selected="false">Статистика</button>
+  <button role="tab" data-tab="settings" aria-selected="false">Настройки</button>
+</nav>
+
+<div class="thanks" id="thanks" aria-live="polite">Спасибо ✓</div>
+
+<script>
+(() => {
+  'use strict';
+  const ORGS_KEY = 'orgs.v1', LOG_KEY = 'log.v1';
+  const DEFAULT_ORGS = ['Организация 1', 'Организация 2', 'Организация 3'];
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- Хранилище ----------
+  function load(key, fallback) {
+    try {
+      const v = JSON.parse(localStorage.getItem(key));
+      return Array.isArray(v) ? v : fallback;
+    } catch { return fallback; }
+  }
+  function save(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); }
+    catch { alert('Не удалось сохранить данные на устройстве.'); }
+  }
+
+  let orgs = load(ORGS_KEY, null);
+  if (!orgs) { orgs = DEFAULT_ORGS.slice(); save(ORGS_KEY, orgs); }
+  let log = load(LOG_KEY, []);
+  let lastIndex = -1;           // индекс последней записи этой сессии для «Отменить»
+  let period = 'today';
+
+  // ---------- Вкладки ----------
+  document.querySelectorAll('nav button').forEach((b) => {
+    b.addEventListener('click', () => showTab(b.dataset.tab));
+  });
+  function showTab(name) {
+    document.querySelectorAll('nav button').forEach((b) =>
+      b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+    document.querySelectorAll('main > section').forEach((s) =>
+      s.classList.toggle('active', s.id === 'tab-' + name));
+    if (name === 'stats') renderStats();
+    if (name === 'settings') renderSettings();
+    $('tab-' + name).parentElement.scrollTop = 0;
+  }
+
+  // ---------- Приём ----------
+  function renderButtons() {
+    const box = $('orgButtons');
+    box.textContent = '';
+    if (!orgs.length) {
+      box.innerHTML = '<p class="empty muted">Добавьте организации во вкладке «Настройки».</p>';
+      return;
+    }
+    orgs.forEach((name) => {
+      const b = document.createElement('button');
+      b.className = 'org-btn';
+      b.textContent = name;
+      b.addEventListener('click', () => record(name, b));
+      box.appendChild(b);
+    });
+  }
+
+  let thanksTimer;
+  function record(name, btn) {
+    log.push({ o: name, t: Date.now() });
+    save(LOG_KEY, log);
+    lastIndex = log.length - 1;
+    $('undoBtn').disabled = false;
+
+    btn.classList.add('flash');
+    setTimeout(() => btn.classList.remove('flash'), 250);
+    if (navigator.vibrate) navigator.vibrate(60);
+    const t = $('thanks');
+    t.textContent = 'Спасибо ✓';
+    t.classList.add('show');
+    clearTimeout(thanksTimer);
+    thanksTimer = setTimeout(() => t.classList.remove('show'), 1200);
+  }
+
+  $('undoBtn').addEventListener('click', () => {
+    if (lastIndex < 0 || lastIndex >= log.length) return;
+    log.splice(lastIndex, 1);
+    save(LOG_KEY, log);
+    lastIndex = -1;
+    $('undoBtn').disabled = true;
+    const t = $('thanks');
+    t.textContent = 'Отменено';
+    t.classList.add('show');
+    clearTimeout(thanksTimer);
+    thanksTimer = setTimeout(() => t.classList.remove('show'), 1000);
+  });
+
+  // ---------- Статистика ----------
+  function periodStart(p) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    if (p === 'today') return d.getTime();
+    if (p === 'week') { d.setDate(d.getDate() - 6); return d.getTime(); } // последние 7 дней
+    return 0;
+  }
+
+  document.querySelectorAll('.periods button').forEach((b) => {
+    b.addEventListener('click', () => {
+      period = b.dataset.period;
+      document.querySelectorAll('.periods button').forEach((x) =>
+        x.setAttribute('aria-pressed', String(x === b)));
+      renderStats();
+    });
+  });
+
+  function plural(n) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'человека';
+    return 'человек';
+  }
+
+  function renderStats() {
+    const from = periodStart(period);
+    const counts = new Map();
+    orgs.forEach((o) => counts.set(o, 0));
+    let total = 0;
+    for (const e of log) {
+      if (e.t < from) continue;
+      counts.set(e.o, (counts.get(e.o) || 0) + 1);
+      total++;
+    }
+    $('total').textContent = total;
+    $('totalLabel').textContent = plural(total);
+
+    const rows = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ru'));
+    const box = $('statRows');
+    box.textContent = '';
+    if (!rows.length) {
+      box.innerHTML = '<p class="empty muted">Нет данных.</p>';
+      return;
+    }
+    for (const [name, n] of rows) {
+      const pct = total ? Math.round((n / total) * 100) : 0;
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = '<div class="row-head"><span class="row-name"></span><span class="row-num"></span></div><div class="bar"><i></i></div>';
+      row.querySelector('.row-name').textContent = name + (orgs.includes(name) ? '' : ' (архив)');
+      row.querySelector('.row-num').textContent = n + ' · ' + pct + '%';
+      row.querySelector('.bar > i').style.width = (total ? (n / total) * 100 : 0) + '%';
+      box.appendChild(row);
+    }
+  }
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function csvCell(s) { return /[",;\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+
+  $('exportBtn').addEventListener('click', () => {
+    const lines = ['Организация;Дата;Время'];
+    for (const e of log) {
+      const d = new Date(e.t);
+      lines.push([
+        csvCell(e.o),
+        pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear(),
+        pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds())
+      ].join(';'));
+    }
+    // BOM + «;» — чтобы Excel корректно открыл кириллицу
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const now = new Date();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'kto-otkuda-' + now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+
+  $('resetBtn').addEventListener('click', () => {
+    if (!log.length) { alert('Статистика уже пуста.'); return; }
+    if (!confirm('Удалить всю статистику (' + log.length + ' записей)? Это нельзя отменить.')) return;
+    log = [];
+    save(LOG_KEY, log);
+    lastIndex = -1;
+    $('undoBtn').disabled = true;
+    renderStats();
+  });
+
+  // ---------- Настройки ----------
+  function renderSettings() {
+    const box = $('orgList');
+    box.textContent = '';
+    if (!orgs.length) {
+      box.innerHTML = '<p class="empty muted">Список пуст.</p>';
+      return;
+    }
+    orgs.forEach((name, i) => {
+      const item = document.createElement('div');
+      item.className = 'org-item';
+      const span = document.createElement('span');
+      span.textContent = name;
+      const ren = document.createElement('button');
+      ren.className = 'icon-btn'; ren.textContent = 'Переименовать';
+      ren.addEventListener('click', () => renameOrg(i));
+      const del = document.createElement('button');
+      del.className = 'icon-btn'; del.textContent = 'Удалить';
+      del.addEventListener('click', () => deleteOrg(i));
+      item.append(span, ren, del);
+      box.appendChild(item);
+    });
+  }
+
+  function cleanName(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
+
+  function saveOrgs() {
+    save(ORGS_KEY, orgs);
+    renderSettings();
+    renderButtons();
+  }
+
+  $('addForm').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const name = cleanName($('newOrg').value);
+    if (!name) return;
+    if (orgs.includes(name)) { alert('Такая организация уже есть.'); return; }
+    orgs.push(name);
+    $('newOrg').value = '';
+    saveOrgs();
+  });
+
+  function renameOrg(i) {
+    const name = cleanName(prompt('Новое название:', orgs[i]));
+    if (!name || name === orgs[i]) return;
+    if (orgs.includes(name)) { alert('Такая организация уже есть.'); return; }
+    orgs[i] = name;   // прошлые записи остаются под старым названием
+    saveOrgs();
+  }
+
+  function deleteOrg(i) {
+    if (!confirm('Удалить «' + orgs[i] + '»? Прошлые записи сохранятся в статистике.')) return;
+    orgs.splice(i, 1);
+    saveOrgs();
+  }
+
+  // ---------- Старт ----------
+  renderButtons();
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+})();
+</script>
+</body>
+</html>
